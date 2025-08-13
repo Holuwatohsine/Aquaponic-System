@@ -1,0 +1,271 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+def calculate_energy_balance(system_type='pilot'):
+    """Calculate energy consumption and costs for aquaponics system"""
+
+    if system_type == 'pilot':
+        # Power consumption (W)
+        pump_power = 150
+        aerator_power = 80  # 2x40W
+        light_power = 225  # 150W/m² × 1.5m²
+        heater_power = 1000
+        control_power = 70
+
+        # Operating hours per day
+        pump_hours = 24
+        aerator_hours = 24
+        light_hours = 16
+        heater_hours = 8  # average
+        control_hours = 24
+
+        kg_fish_year = 30
+
+    else:  # scaled
+        # Power consumption (W)
+        pump_power = 1050
+        aerator_power = 400  # 4x100W
+        light_power = 1250  # 120W/m² × 10.4m²
+        heater_power = 5000
+        control_power = 150
+
+        # Operating hours per day
+        pump_hours = 24
+        aerator_hours = 24
+        light_hours = 16
+        heater_hours = 6  # better insulation
+        control_hours = 24
+
+        kg_fish_year = 210
+
+    # Daily energy consumption (kWh)
+    daily_energy = {
+        'pumping': (pump_power * pump_hours) / 1000,
+        'aeration': (aerator_power * aerator_hours) / 1000,
+        'lighting': (light_power * light_hours) / 1000,
+        'heating': (heater_power * heater_hours) / 1000,
+        'control': (control_power * control_hours) / 1000
+    }
+
+    # Calculate totals
+    total_daily = sum(daily_energy.values())
+    annual_total = total_daily * 350  # operational days
+
+    # Costs
+    electricity_rate = 0.12  # $/kWh
+    annual_cost = annual_total * electricity_rate
+
+    # Peak demand (kW)
+    peak_demand = (pump_power + aerator_power + light_power + heater_power + control_power) / 1000
+
+    # Energy intensity
+    energy_per_kg = annual_total / kg_fish_year
+
+    # Calculate percentages
+    percentages = {k: (v/total_daily)*100 for k, v in daily_energy.items()}
+
+    return {
+        'system': system_type,
+        'daily_kwh': daily_energy,
+        'percentages': percentages,
+        'total_daily_kwh': total_daily,
+        'annual_kwh': annual_total,
+        'peak_demand_kw': peak_demand,
+        'annual_cost_usd': annual_cost,
+        'energy_per_kg_fish': energy_per_kg,
+        'cost_per_kwh': annual_cost / annual_total
+    }
+
+def plot_energy_analysis():
+    """Create comprehensive energy analysis visualization"""
+
+    # Calculate for both systems
+    pilot = calculate_energy_balance('pilot')
+    scaled = calculate_energy_balance('scaled')
+
+    # Create figure with 4 subplots
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle('Aquaponics Energy Balance Analysis', fontsize=16, fontweight='bold')
+
+    # 1. Energy breakdown comparison (bar chart)
+    components = ['Pumping', 'Aeration', 'Lighting', 'Heating', 'Control']
+    pilot_values = list(pilot['daily_kwh'].values())
+    scaled_values = list(scaled['daily_kwh'].values())
+
+    x = np.arange(len(components))
+    width = 0.35
+
+    bars1 = ax1.bar(x - width/2, pilot_values, width, label='Baseline', color='#3498db', alpha=0.8)
+    bars2 = ax1.bar(x + width/2, scaled_values, width, label='Scaled', color='#2ecc71', alpha=0.8)
+
+    ax1.set_ylabel('Daily Energy (kWh)')
+    ax1.set_title('Daily Energy Consumption by Component')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(components, rotation=45)
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+
+    # Add value labels on bars
+    for bars in [bars1, bars2]:
+        for bar in bars:
+            height = bar.get_height()
+            ax1.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{height:.1f}', ha='center', va='bottom', fontsize=8)
+
+    # 2. Percentage distribution (pie chart for pilot)
+    labels = components
+    sizes = list(pilot['percentages'].values())
+    colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7']
+    explode = (0, 0, 0.1, 0, 0)  # explode lighting
+
+    ax2.pie(sizes, explode=explode, labels=labels, colors=colors,
+            autopct='%1.1f%%', shadow=True, startangle=90)
+    ax2.set_title(f"Baseline System Energy Distribution\n({pilot['total_daily_kwh']:.1f} kWh/day)")
+
+    # 3. System comparison metrics
+    metrics = ['Daily\n(kWh)', 'Annual\n(MWh)', 'Peak\n(kW)', 'Cost\n($100/yr)', 'Per kg\n(kWh/kg)']
+    pilot_metrics = [
+        pilot['total_daily_kwh'],
+        pilot['annual_kwh']/1000,  # Convert to MWh
+        pilot['peak_demand_kw'],
+        pilot['annual_cost_usd']/100,  # Scale to hundreds
+        pilot['energy_per_kg_fish']
+    ]
+    scaled_metrics = [
+        scaled['total_daily_kwh'],
+        scaled['annual_kwh']/1000,
+        scaled['peak_demand_kw'],
+        scaled['annual_cost_usd']/100,
+        scaled['energy_per_kg_fish']
+    ]
+
+    x = np.arange(len(metrics))
+    bars1 = ax3.bar(x - width/2, pilot_metrics, width, label='Baseline', color='#9b59b6', alpha=0.8)
+    bars2 = ax3.bar(x + width/2, scaled_metrics, width, label='Scaled', color='#1abc9c', alpha=0.8)
+
+    ax3.set_ylabel('Value')
+    ax3.set_title('Energy Metrics Comparison')
+    ax3.set_xticks(x)
+    ax3.set_xticklabels(metrics)
+    ax3.legend()
+    ax3.grid(True, alpha=0.3)
+
+    # Add value labels
+    for bars, values in [(bars1, pilot_metrics), (bars2, scaled_metrics)]:
+        for bar, val in zip(bars, values):
+            height = bar.get_height()
+            ax3.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{val:.1f}', ha='center', va='bottom', fontsize=8)
+
+    # 4. 24-hour load profile
+    hours = np.arange(24)
+
+    # Base load (pumping + aeration + control)
+    base_load_pilot = (pilot['daily_kwh']['pumping'] +
+                pilot['daily_kwh']['aeration'] +
+                pilot['daily_kwh']['control']) / 24
+
+    # Create load profile for pilot system
+    load_profile_pilot = np.ones(24) * base_load_pilot
+
+    # Add lighting (6am to 10pm) for pilot
+    lighting_hourly_pilot = pilot['daily_kwh']['lighting'] / 16
+    for h in range(6, 22):
+        load_profile_pilot[h] += lighting_hourly_pilot
+
+    # Add heating (night and early morning) for pilot
+    heating_hourly_pilot = pilot['daily_kwh']['heating'] / 8
+    for h in range(0, 6):
+        load_profile_pilot[h] += heating_hourly_pilot
+    for h in range(22, 24):
+        load_profile_pilot[h] += heating_hourly_pilot
+
+
+    ax4.plot(hours, load_profile_pilot, 'b-', linewidth=2, marker='o', markersize=4)
+    ax4.fill_between(hours, 0, load_profile_pilot, alpha=0.3, color='skyblue')
+    ax4.axhline(y=base_load_pilot, color='red', linestyle='--', alpha=0.5, label='Base Load')
+    ax4.set_title('24-Hour Load Profile (Baseline System)')
+    ax4.set_xlabel('Hour of Day')
+    ax4.set_ylabel('Power (kW)')
+    ax4.grid(True, alpha=0.3)
+    ax4.set_xlim(0, 23)
+    ax4.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+    return fig
+
+def print_energy_results():
+    """Print detailed energy balance results"""
+
+    # Calculate for both systems
+    pilot = calculate_energy_balance('pilot')
+    scaled = calculate_energy_balance('scaled')
+
+    print("="*70)
+    print("                    ENERGY BALANCE ANALYSIS RESULTS")
+    print("="*70)
+
+    print("\n1. DAILY ENERGY CONSUMPTION (kWh/day)")
+    print("-"*50)
+    print(f"{'Component':<15} {'Baseline':<12} {'Scaled':<12} {'Scale Factor':<12}")
+    print("-"*50)
+    for component in pilot['daily_kwh'].keys():
+        pilot_val = pilot['daily_kwh'][component]
+        scaled_val = scaled['daily_kwh'][component]
+        scale = scaled_val / pilot_val if pilot_val > 0 else 0
+        print(f"{component.capitalize():<15} {pilot_val:<12.2f} {scaled_val:<12.2f} {scale:<12.1f}x")
+    print("-"*50)
+    print(f"{'TOTAL':<15} {pilot['total_daily_kwh']:<12.2f} {scaled['total_daily_kwh']:<12.2f} "
+          f"{scaled['total_daily_kwh']/pilot['total_daily_kwh']:<12.1f}x")
+
+    print("\n2. ENERGY DISTRIBUTION (%)")
+    print("-"*50)
+    print(f"{'Component':<15} {'Baseline (%)':<12} {'Scaled (%)':<12}")
+    print("-"*50)
+    for component in pilot['percentages'].keys():
+        print(f"{component.capitalize():<15} {pilot['percentages'][component]:<12.1f} "
+              f"{scaled['percentages'][component]:<12.1f}")
+
+    print("\n3. ANNUAL ENERGY METRICS")
+    print("-"*50)
+    print(f"{'Metric':<30} {'Baseline':<15} {'Scaled':<15}")
+    print("-"*50)
+    print(f"{'Annual Consumption (kWh)':<30} {pilot['annual_kwh']:<15,.0f} {scaled['annual_kwh']:<15,.0f}")
+    print(f"{'Peak Demand (kW)':<30} {pilot['peak_demand_kw']:<15.2f} {scaled['peak_demand_kw']:<15.2f}")
+    print(f"{'Annual Cost ($)':<30} {pilot['annual_cost_usd']:<15,.2f} {scaled['annual_cost_usd']:<15,.2f}")
+    print(f"{'Cost per kWh ($/kWh)':<30} {pilot['cost_per_kwh']:<15.3f} {scaled['cost_per_kwh']:<15.3f}")
+
+    print("\n4. ENERGY EFFICIENCY METRICS")
+    print("-"*50)
+    print(f"{'Metric':<30} {'Baseline':<15} {'Scaled':<15} {'Improvement':<15}")
+    print("-"*50)
+    pilot_eff = pilot['energy_per_kg_fish']
+    scaled_eff = scaled['energy_per_kg_fish']
+    improvement = ((pilot_eff - scaled_eff) / pilot_eff) * 100
+    print(f"{'Energy per kg fish (kWh/kg)':<30} {pilot_eff:<15.1f} {scaled_eff:<15.1f} {improvement:<14.1f}%")
+    print(f"{'Daily per kg fish (kWh/kg)':<30} {pilot['total_daily_kwh']/30*365:<15.1f} "
+          f"{scaled['total_daily_kwh']/210*365:<15.1f}")
+
+    print("\n5. KEY FINDINGS")
+    print("-"*50)
+    print(f"✓ Scaled system is {scaled['annual_kwh']/pilot['annual_kwh']:.1f}x larger but uses "
+          f"{improvement:.1f}% less energy per kg fish")
+    print(f"✓ Lighting accounts for {pilot['percentages']['lighting']:.1f}% (Baseline) and "
+          f"{scaled['percentages']['lighting']:.1f}% (scaled) of energy use")
+    print(f"✓ Base load (24/7 operations) represents {(pilot['percentages']['pumping'] + pilot['percentages']['aeration'] + pilot['percentages']['control']):.1f}% of consumption")
+    print(f"✓ Annual operating cost: ${pilot['annual_cost_usd']:,.2f} (Baseline) vs ${scaled['annual_cost_usd']:,.2f} (scaled)")
+    print(f"✓ Peak demand: {pilot['peak_demand_kw']:.1f} kW (Baseline) vs {scaled['peak_demand_kw']:.1f} kW (scaled)")
+
+    print("\n" + "="*70)
+
+# Main execution
+if __name__ == "__main__":
+    # Print numerical results
+    print_energy_results()
+
+    # Generate visualization
+    print("\nGenerating energy balance visualization...")
+    plot_energy_analysis()
+    print("\nAnalysis complete!")
