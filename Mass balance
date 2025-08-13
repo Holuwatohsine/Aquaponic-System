@@ -1,0 +1,603 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from dataclasses import dataclass
+from typing import Dict
+
+plt.style.use('default')
+
+@dataclass
+class PilotSystemParameters:
+    fish_tank_volume: float = 757
+    settling_tank_volume: float = 189
+    biofilter_volume: float = 189
+    hydroponic_tank_volume: float = 681
+    sump_tank_volume: float = 189
+    total_volume: float = 1825
+    flow_rate: float = 15
+    tank_volume_m3: float = 0.757
+    stocking_density: float = 20
+    max_biomass_capacity: float = 15.14
+    initial_weight: float = 100
+    harvest_weight: float = 670
+    survival_rate: float = 0.983
+    mortality_rate: float = 0.017
+    fish_count_fingerlings: float = 23
+    fish_count_adults: float = 22.6
+    fcr: float = 1.7
+    feeding_rate: float = 0.03
+    growth_cycles: int = 2
+    growth_rate: float = 4.4
+    cycle_duration: float = 129
+    grow_bed_area: float = 1.49
+    plant_density: float = 20
+    total_plants: float = 30
+    plants_per_raft: int = 30
+    num_rafts: int = 1
+    lettuce_weight: float = 50
+    germination_rate: float = 0.90
+    harvest_cycle: float = 45
+    temperature: float = 25.0
+    do_target: float = 6.0
+    ph_target: float = 7.0
+
+@dataclass
+class ScaledSystemParameters:
+    fish_tank_volume: float = 5300
+    settling_tank_volume: float = 1323
+    biofilter_volume: float = 1323
+    hydroponic_tank_volume: float = 4767
+    sump_tank_volume: float = 1323
+    total_volume: float = 12775
+    flow_rate: float = 105
+    tank_volume_m3: float = 5.3
+    stocking_density: float = 20
+    max_biomass_capacity: float = 106
+    fish_count_fingerlings: float = 161
+    fish_count_adults: float = 158.2
+    initial_weight: float = 100
+    harvest_weight: float = 670
+    survival_rate: float = 0.983
+    mortality_rate: float = 0.017
+    fcr: float = 1.7
+    feeding_rate: float = 0.03
+    growth_cycles: int = 2
+    growth_rate: float = 4.4
+    cycle_duration: float = 129
+    grow_bed_area: float = 10.43
+    plant_density: float = 20
+    total_plants: float = 208
+    plants_per_raft: int = 208
+    num_rafts: int = 1
+    lettuce_weight: float = 50
+    germination_rate: float = 0.90
+    harvest_cycle: float = 45
+    temperature: float = 25.0
+    do_target: float = 6.0
+    ph_target: float = 7.0
+
+class NutrientBalance:
+    def __init__(self, params):
+        self.params = params
+        self.protein_content = 0.32
+        self.n_in_protein = 0.16
+        self.fish_retention_frac = 0.25
+        self.tan_fraction = 0.60
+        self.nitrif_eff = 0.90
+        self.no3_uptake_rate = 0.5
+        self.p_in_feed = 0.01
+        self.p_retention_fish = 0.50
+        self.p_dissolved = 0.30
+        self.p_particulate = 0.20
+        self.p_uptake_rate = 0.5
+        self.fish_o2_consumption = 0.35
+        self.plant_o2_production = 0.8
+        self.plant_o2_consumption = 0.2
+        self.nitrification_o2_demand = 4.57
+
+    def calculate_daily_balance(self, fish_biomass: float, plant_biomass: float, feed_rate: float) -> Dict:
+        n_feed_input = feed_rate * 1e6 * self.protein_content * self.n_in_protein
+        n_fish_retention = n_feed_input * self.fish_retention_frac
+        n_excreted = n_feed_input - n_fish_retention
+        tan_produced = n_excreted * self.tan_fraction
+        no3_from_nitrif = tan_produced * self.nitrif_eff
+        max_plant_uptake = self.no3_uptake_rate * plant_biomass * 24
+        n_plant_uptake = min(max_plant_uptake, no3_from_nitrif)
+        nh3_residual = tan_produced * (1 - self.nitrif_eff)
+        no3_residual = max(0.0, no3_from_nitrif - n_plant_uptake)
+        n_recovery = (n_fish_retention + n_plant_uptake) / n_feed_input * 100.0
+
+        p_feed_input = feed_rate * 1e6 * self.p_in_feed
+        p_fish_retention = p_feed_input * self.p_retention_fish
+        p_dissolved_production = p_feed_input * self.p_dissolved
+        p_particulate_production = p_feed_input * self.p_particulate
+        max_plant_p_uptake = self.p_uptake_rate * plant_biomass * 24
+        p_plant_uptake = min(max_plant_p_uptake, p_dissolved_production * 0.8)
+        p_residual = max(0.0, p_dissolved_production - p_plant_uptake)
+        p_recovery = (p_fish_retention + p_plant_uptake) / p_feed_input * 100.0
+
+        fish_o2_consumption = self.fish_o2_consumption * fish_biomass * 24
+        plant_o2_production = self.plant_o2_production * plant_biomass * 12
+        plant_o2_consumption = self.plant_o2_consumption * plant_biomass * 24
+        nitrification_o2_demand = no3_from_nitrif * self.nitrification_o2_demand
+        net_o2_balance = plant_o2_production - fish_o2_consumption - plant_o2_consumption - nitrification_o2_demand
+        o2_demand_total = fish_o2_consumption + plant_o2_consumption + nitrification_o2_demand
+
+        return {
+            'nitrogen': {
+                'feed_input': n_feed_input,
+                'fish_retention': n_fish_retention,
+                'excreted': n_excreted,
+                'tan_produced': tan_produced,
+                'no3_from_nitrif': no3_from_nitrif,
+                'plant_uptake': n_plant_uptake,
+                'nh3_residual': nh3_residual,
+                'no3_residual': no3_residual,
+                'recovery_percent': n_recovery
+            },
+            'phosphorus': {
+                'feed_input': p_feed_input,
+                'fish_retention': p_fish_retention,
+                'dissolved': p_dissolved_production,
+                'particulate': p_particulate_production,
+                'plant_uptake': p_plant_uptake,
+                'residual': p_residual,
+                'recovery_percent': p_recovery
+            },
+            'oxygen': {
+                'fish_consumption': fish_o2_consumption,
+                'plant_production': plant_o2_production,
+                'plant_consumption': plant_o2_consumption,
+                'nitrification_demand': nitrification_o2_demand,
+                'net_balance': net_o2_balance,
+                'total_demand': o2_demand_total,
+                'aeration_required': max(0, -net_o2_balance)
+            }
+        }
+
+class WaterQuality:
+    def __init__(self, params):
+        self.params = params
+
+    def calculate_water_parameters(self, nutrient_balance: Dict, flow_rate: float, params) -> Dict:
+        daily_flow = flow_rate * 60 * 24
+        nh3_concentration = nutrient_balance['nitrogen']['nh3_residual'] / daily_flow
+        no3_concentration = nutrient_balance['nitrogen']['no3_residual'] / daily_flow
+        dissolved_p_conc = nutrient_balance['phosphorus']['residual'] / daily_flow
+        ph_drop = nutrient_balance['nitrogen']['nh3_residual'] * 0.00005
+        estimated_ph = max(params.ph_target - ph_drop, 6.8)
+        water_temp = params.temperature
+        do_target = params.do_target
+        do_deficit = nutrient_balance['oxygen']['total_demand'] / daily_flow
+        estimated_do = max(do_target, do_target - do_deficit * 0.1)
+        return {
+            'nh3_n': min(nh3_concentration, 0.5),
+            'no3_n': no3_concentration,
+            'dissolved_p': dissolved_p_conc,
+            'ph': estimated_ph,
+            'temperature': water_temp,
+            'dissolved_oxygen': estimated_do
+        }
+
+class MassBalance:
+    def __init__(self, params):
+        self.params = params
+
+    def calculate_annual_balance(self) -> Dict:
+        fingerlings_stocked = self.params.fish_count_fingerlings
+        survival_rate = 1 - self.params.mortality_rate
+        adults_harvested = fingerlings_stocked * survival_rate
+        initial_biomass_per_cycle = fingerlings_stocked * self.params.initial_weight / 1000
+        final_biomass_per_cycle = adults_harvested * self.params.harvest_weight / 1000
+        biomass_gained_per_cycle = final_biomass_per_cycle - initial_biomass_per_cycle
+        annual_fish_production = biomass_gained_per_cycle * self.params.growth_cycles
+        annual_fish_harvest = final_biomass_per_cycle * self.params.growth_cycles
+        avg_weight_during_cycle = (self.params.initial_weight + self.params.harvest_weight) / 2
+        avg_biomass_kg = fingerlings_stocked * avg_weight_during_cycle / 1000
+        daily_feed_kg = avg_biomass_kg * self.params.feeding_rate
+        feed_per_cycle = daily_feed_kg * self.params.cycle_duration
+        annual_feed = feed_per_cycle * self.params.growth_cycles
+        total_plants = self.params.grow_bed_area * self.params.plant_density
+        harvests_per_year = 365 / self.params.harvest_cycle
+        annual_plant_count = total_plants * harvests_per_year * self.params.germination_rate
+        annual_plant_biomass = annual_plant_count * self.params.lettuce_weight / 1000
+        evapotranspiration = 2.0 * self.params.grow_bed_area * 365
+        filter_cleaning = (self.params.settling_tank_volume + self.params.biofilter_volume) * 0.1 * 26
+        daily_exchange = self.params.total_volume * 0.05 * 365
+        total_water_consumption = evapotranspiration + filter_cleaning + daily_exchange
+        total_production = annual_fish_harvest + annual_plant_biomass
+        wue = total_production / (total_water_consumption / 1000)
+        nitrogen_input = annual_feed * 0.32 * 0.16
+        phosphorus_input = annual_feed * 0.01
+        fish_waste_solids = annual_fish_harvest * 0.3
+        uneaten_feed = annual_feed * 0.05
+        total_solids_waste = fish_waste_solids + uneaten_feed
+        fish_mortality_count = fingerlings_stocked * self.params.mortality_rate * self.params.growth_cycles
+        mortality_loss_kg = fish_mortality_count * avg_weight_during_cycle / 1000
+        return {
+            'inputs': {
+                'fingerlings': fingerlings_stocked * self.params.growth_cycles,
+                'feed_kg': annual_feed,
+                'seeds': annual_plant_count / self.params.germination_rate,
+                'water_L': total_water_consumption,
+                'nitrogen_kg': nitrogen_input,
+                'phosphorus_kg': phosphorus_input
+            },
+            'outputs': {
+                'fish_kg': annual_fish_harvest,
+                'fish_count': adults_harvested * self.params.growth_cycles,
+                'lettuce_kg': annual_plant_biomass,
+                'lettuce_count': annual_plant_count,
+                'solid_waste_kg': total_solids_waste,
+                'mortality_loss_kg': mortality_loss_kg
+            },
+            'efficiency': {
+                'feed_conversion': self.params.fcr,
+                'water_use_efficiency': wue,
+                'kg_lettuce_per_kg_fish': annual_plant_biomass / annual_fish_harvest if annual_fish_harvest > 0 else 0,
+                'nitrogen_utilization': 55.0,
+                'phosphorus_utilization': 65.0,
+                'system_productivity': total_production / self.params.grow_bed_area,
+                'survival_rate': survival_rate * 100,
+                'biomass_gain_per_cycle': biomass_gained_per_cycle,
+                'stocking_efficiency': (final_biomass_per_cycle / self.params.max_biomass_capacity) * 100
+            },
+            'fish_biology': {
+                'fingerlings_stocked': fingerlings_stocked,
+                'adults_harvested': adults_harvested,
+                'initial_biomass_kg': initial_biomass_per_cycle,
+                'final_biomass_kg': final_biomass_per_cycle,
+                'weight_gain_per_fish_g': self.params.harvest_weight - self.params.initial_weight,
+                'mortality_count': fish_mortality_count
+            }
+        }
+
+class NutrientVisualization:
+    def __init__(self, seed: int = 42):
+        self.rng = np.random.default_rng(seed)
+        plt.rcParams.update({'font.size': 12,'axes.titlesize': 14,'axes.labelsize': 12,'xtick.labelsize': 10,'ytick.labelsize': 10,'legend.fontsize': 10,'figure.titlesize': 16})
+
+    def plot_nutrient_dynamics(self, pilot_analysis: Dict, scaled_analysis: Dict):
+        time_days = np.linspace(0, 90, 91)
+        nh3_fish_tank = np.piecewise(
+            time_days,
+            [time_days <= 30, (time_days > 30) & (time_days <= 60), time_days > 60],
+            [
+                lambda t: 0.8 * np.exp(-t/15) + 0.1,
+                lambda t: 0.15 + 0.05 * self.rng.normal(0, 0.1, size=t.size),
+                lambda t: 0.15 + 0.1 * np.exp(-(t-60)/10),
+            ],
+        )
+        no3_biofilter = np.piecewise(
+            time_days,
+            [time_days <= 30, (time_days > 30) & (time_days <= 60), time_days > 60],
+            [
+                lambda t: 3.5 * (1 - np.exp(-t/20)),
+                lambda t: 3.2 + 0.3 * self.rng.normal(0, 0.1, size=t.size),
+                lambda t: 3.2 - 0.5 * np.exp(-(t-60)/8) + 0.5,
+            ],
+        )
+        no3_plant_bed = no3_biofilter * 0.7
+        do_levels = 6.0 + 0.5 * self.rng.normal(0, 0.2, size=time_days.size)
+        do_levels = np.clip(do_levels, 5.5, 7.0)
+        p_dissolved = 0.3 + 0.4 * (1 - np.exp(-time_days/45)) + 0.1 * self.rng.normal(0, 0.05, size=time_days.size)
+        p_dissolved = np.clip(p_dissolved, 0.2, 0.8)
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
+        fig.suptitle('Realistic Aquaponics Nutrient Dynamics (90-Day Operation)', fontsize=16, fontweight='bold')
+        ax1.plot(time_days, nh3_fish_tank, linewidth=3, label='NH3-N (Fish Tank)', marker='o', markersize=3, markevery=10)
+        ax1.plot(time_days, no3_biofilter, linewidth=3, label='NO3-N (Biofilter)', marker='s', markersize=3, markevery=10)
+        ax1.plot(time_days, no3_plant_bed, linewidth=3, label='NO3-N (Plant Bed)', marker='^', markersize=3, markevery=10)
+        ax1.axvspan(0, 30, alpha=0.2, color='red', label='Startup')
+        ax1.axvspan(30, 60, alpha=0.2, color='green', label='Steady')
+        ax1.axvspan(60, 90, alpha=0.2, color='orange', label='Harvest/Recovery')
+        ax1.axhline(y=0.5, color='red', linestyle='--', linewidth=2, alpha=0.7, label='NH3-N Limit')
+        ax1.set_title('Nitrogen Dynamics')
+        ax1.set_xlabel('Time (days)')
+        ax1.set_ylabel('Concentration (mg/L)')
+        ax1.legend(loc='upper right', fontsize=9)
+        ax1.grid(True, alpha=0.3)
+        ax1.set_ylim(0, 4.5)
+        systems = ['Pilot System', 'Scaled System']
+        n_recovery = [pilot_analysis['nitrogen']['recovery_percent'], scaled_analysis['nitrogen']['recovery_percent']]
+        p_recovery = [pilot_analysis['phosphorus']['recovery_percent'], scaled_analysis['phosphorus']['recovery_percent']]
+        x = np.arange(len(systems))
+        width = 0.35
+        bars1 = ax2.bar(x - width/2, n_recovery, width, label='Nitrogen', edgecolor='black', alpha=0.8)
+        bars2 = ax2.bar(x + width/2, p_recovery, width, label='Phosphorus', edgecolor='black', alpha=0.8)
+        ax2.set_title('Nutrient Recovery Efficiency')
+        ax2.set_ylabel('Recovery (%)')
+        ax2.set_xticks(x)
+        ax2.set_xticklabels(systems)
+        ax2.legend()
+        ax2.grid(True, alpha=0.3, axis='y')
+        ax2.set_ylim(0, 100)
+        for bars in [bars1, bars2]:
+            for bar in bars:
+                h = bar.get_height()
+                ax2.text(bar.get_x() + bar.get_width()/2., h + 1, f'{h:.1f}%', ha='center', va='bottom', fontweight='bold')
+        ax3.plot(time_days, do_levels, linewidth=3, marker='o', markersize=2, markevery=5, label='Dissolved Oxygen')
+        ax3.axhline(y=6.0, linestyle='-', linewidth=2, alpha=0.7, label='Target (6.0 mg/L)')
+        ax3.axhline(y=5.0, linestyle='--', linewidth=2, alpha=0.7, label='Minimum Safe')
+        ax3.fill_between(time_days, 5.5, 6.5, alpha=0.2, label='Optimal Range')
+        ax3.set_title('Dissolved Oxygen Monitoring')
+        ax3.set_xlabel('Time (days)')
+        ax3.set_ylabel('Dissolved Oxygen (mg/L)')
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
+        ax3.set_ylim(4.5, 7.5)
+        wq_params = ['pH', 'DO\n(mg/L)', 'NH3-N\n(mg/L)', 'NO3-N\n(mg/L)', 'PO4-P\n(mg/L)']
+        pilot_wq = [7.0, 6.0, 0.15, 3.2, 0.45]
+        target_ranges = [[6.8, 7.4], [5.0, 8.0], [0.0, 0.5], [1.0, 5.0], [0.0, 1.0]]
+        colors = ['green' if target_ranges[i][0] <= pilot_wq[i] <= target_ranges[i][1] else 'orange' for i in range(len(pilot_wq))]
+        bars = ax4.bar(wq_params, pilot_wq, color=colors, alpha=0.7, edgecolor='black')
+        ax4.set_title('Steady-State Water Quality Parameters')
+        ax4.set_ylabel('Concentration/Value')
+        ax4.grid(True, alpha=0.3, axis='y')
+        for i, (param, value, rng) in enumerate(zip(wq_params, pilot_wq, target_ranges)):
+            ax4.axhspan(rng[0], rng[1], xmin=(i-0.4)/len(wq_params), xmax=(i+0.4)/len(wq_params), alpha=0.3, color='lightgreen')
+        for bar, value in zip(bars, pilot_wq):
+            h = bar.get_height()
+            ax4.text(bar.get_x() + bar.get_width()/2., h + 0.1, f'{value:.2f}', ha='center', va='bottom', fontweight='bold')
+        plt.tight_layout()
+        plt.savefig('nutrient_dynamics.png', dpi=300, bbox_inches='tight')
+        plt.show()
+
+    def plot_mass_balance(self, pilot_mass: Dict, scaled_mass: Dict):
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
+        fig.suptitle('System Mass Balance Analysis', fontsize=16, fontweight='bold')
+        input_categories = ['Feed', 'Seeds', 'Fingerlings', 'Water (m³)']
+        pilot_inputs = [
+            pilot_mass['inputs']['feed_kg'],
+            pilot_mass['inputs']['seeds']/1000,
+            pilot_mass['inputs']['fingerlings'],
+            pilot_mass['inputs']['water_L']/1000
+        ]
+        scaled_inputs = [
+            scaled_mass['inputs']['feed_kg'],
+            scaled_mass['inputs']['seeds']/1000,
+            scaled_mass['inputs']['fingerlings'],
+            scaled_mass['inputs']['water_L']/1000
+        ]
+        x = np.arange(len(input_categories))
+        width = 0.35
+        ax1.bar(x - width/2, pilot_inputs, width, label='Pilot', edgecolor='black', alpha=0.8)
+        ax1.bar(x + width/2, scaled_inputs, width, label='Scaled', edgecolor='black', alpha=0.8)
+        ax1.set_title('Annual System Inputs')
+        ax1.set_ylabel('Quantity (kg, count, or m³)')
+        ax1.set_xticks(x)
+        ax1.set_xticklabels(input_categories)
+        ax1.legend()
+        ax1.grid(True, alpha=0.3, axis='y')
+        ax1.set_yscale('log')
+        output_categories = ['Fish (kg)', 'Lettuce (kg)', 'Waste (kg)']
+        pilot_outputs = [
+            pilot_mass['outputs']['fish_kg'],
+            pilot_mass['outputs']['lettuce_kg'],
+            pilot_mass['outputs']['solid_waste_kg']
+        ]
+        scaled_outputs = [
+            scaled_mass['outputs']['fish_kg'],
+            scaled_mass['outputs']['lettuce_kg'],
+            scaled_mass['outputs']['solid_waste_kg']
+        ]
+        x2 = np.arange(len(output_categories))
+        b3 = ax2.bar(x2 - width/2, pilot_outputs, width, label='Pilot', edgecolor='black', alpha=0.8)
+        b4 = ax2.bar(x2 + width/2, scaled_outputs, width, label='Scaled', edgecolor='black', alpha=0.8)
+        ax2.set_title('Annual System Outputs')
+        ax2.set_ylabel('Mass (kg/year)')
+        ax2.set_xticks(x2)
+        ax2.set_xticklabels(output_categories)
+        ax2.legend()
+        ax2.grid(True, alpha=0.3, axis='y')
+        for bars, values in [(b3, pilot_outputs), (b4, scaled_outputs)]:
+            for bar, value in zip(bars, values):
+                h = bar.get_height()
+                ax2.text(bar.get_x() + bar.get_width()/2., h + 1, f'{value:.1f}', ha='center', va='bottom', fontweight='bold', fontsize=9)
+        efficiency_metrics = ['FCR', 'WUE (kg/m³)', 'Lettuce:Fish', 'N Util (%)', 'P Util (%)']
+        pilot_efficiency = [
+            pilot_mass['efficiency']['feed_conversion'],
+            pilot_mass['efficiency']['water_use_efficiency'],
+            pilot_mass['efficiency']['kg_lettuce_per_kg_fish'],
+            pilot_mass['efficiency']['nitrogen_utilization'],
+            pilot_mass['efficiency']['phosphorus_utilization']
+        ]
+        scaled_efficiency = [
+            scaled_mass['efficiency']['feed_conversion'],
+            scaled_mass['efficiency']['water_use_efficiency'],
+            scaled_mass['efficiency']['kg_lettuce_per_kg_fish'],
+            scaled_mass['efficiency']['nitrogen_utilization'],
+            scaled_mass['efficiency']['phosphorus_utilization']
+        ]
+        x3 = np.arange(len(efficiency_metrics))
+        ax3.bar(x3 - width/2, pilot_efficiency, width, label='Pilot', edgecolor='black', alpha=0.8)
+        ax3.bar(x3 + width/2, scaled_efficiency, width, label='Scaled', edgecolor='black', alpha=0.8)
+        ax3.set_title('System Efficiency Metrics')
+        ax3.set_ylabel('Efficiency Value')
+        ax3.set_xticks(x3)
+        ax3.set_xticklabels(efficiency_metrics, rotation=45)
+        ax3.legend()
+        ax3.grid(True, alpha=0.3, axis='y')
+        flow_categories = ['Feed N Input', 'Fish N Retention', 'Plant N Uptake', 'System Loss']
+        flow_values = [100, 25, 35, 40]
+        bars = ax4.bar(flow_categories, flow_values, alpha=0.8, edgecolor='black')
+        ax4.set_title('Nitrogen Flow Distribution (%)')
+        ax4.set_ylabel('Percentage of Input (%)')
+        ax4.tick_params(axis='x', rotation=45)
+        ax4.grid(True, alpha=0.3, axis='y')
+        for bar, value in zip(bars, flow_values):
+            h = bar.get_height()
+            ax4.text(bar.get_x() + bar.get_width()/2., h + 1, f'{value}%', ha='center', va='bottom', fontweight='bold')
+        plt.tight_layout()
+        plt.savefig('mass_balance.png', dpi=300, bbox_inches='tight')
+        plt.show()
+
+def analyze_nutrient_mass_balance():
+    pilot_params = PilotSystemParameters()
+    scaled_params = ScaledSystemParameters()
+    pilot_nutrient = NutrientBalance(pilot_params)
+    scaled_nutrient = NutrientBalance(scaled_params)
+    pilot_mass = MassBalance(pilot_params)
+    scaled_mass = MassBalance(scaled_params)
+    pilot_wq = WaterQuality(pilot_params)
+    scaled_wq = WaterQuality(scaled_params)
+    pilot_mass_balance = pilot_mass.calculate_annual_balance()
+    scaled_mass_balance = scaled_mass.calculate_annual_balance()
+    pilot_avg_fish_biomass = pilot_params.fish_count_fingerlings * pilot_params.harvest_weight / 2
+    pilot_avg_plant_biomass = pilot_params.grow_bed_area * pilot_params.plant_density * 50
+    pilot_daily_feed = pilot_mass_balance['inputs']['feed_kg'] / 365
+    scaled_avg_fish_biomass = scaled_params.fish_count_fingerlings * scaled_params.harvest_weight / 2
+    scaled_avg_plant_biomass = scaled_params.grow_bed_area * scaled_params.plant_density * 50
+    scaled_daily_feed = scaled_mass_balance['inputs']['feed_kg'] / 365
+    pilot_nutrients = pilot_nutrient.calculate_daily_balance(pilot_avg_fish_biomass, pilot_avg_plant_biomass, pilot_daily_feed)
+    scaled_nutrients = scaled_nutrient.calculate_daily_balance(scaled_avg_fish_biomass, scaled_avg_plant_biomass, scaled_daily_feed)
+    pilot_water_quality = pilot_wq.calculate_water_parameters(pilot_nutrients, pilot_params.flow_rate, pilot_params)
+    scaled_water_quality = scaled_wq.calculate_water_parameters(scaled_nutrients, scaled_params.flow_rate, scaled_params)
+
+    print("SYSTEM SPECIFICATIONS COMPARISON")
+    print("-" * 50)
+    print(f"{'Parameter':<30} {'Pilot':<15} {'Scaled':<15} {'Scale Factor':<15}")
+    print("-" * 75)
+    print(f"{'Fish Tank Volume (L)':<30} {pilot_params.fish_tank_volume:<15} {scaled_params.fish_tank_volume:<15} {scaled_params.fish_tank_volume/pilot_params.fish_tank_volume:<15.1f}")
+    print(f"{'Total Volume (L)':<30} {pilot_params.total_volume:<15} {scaled_params.total_volume:<15} {scaled_params.total_volume/pilot_params.total_volume:<15.1f}")
+    print(f"{'Growing Area (m²)':<30} {pilot_params.grow_bed_area:<15.1f} {scaled_params.grow_bed_area:<15.1f} {scaled_params.grow_bed_area/pilot_params.grow_bed_area:<15.1f}")
+    print(f"{'Fish Count':<30} {pilot_params.fish_count_fingerlings:<15.0f} {scaled_params.fish_count_fingerlings:<15.0f} {scaled_params.fish_count_fingerlings/pilot_params.fish_count_fingerlings:<15.1f}")
+    print(f"{'Flow Rate (L/min)':<30} {pilot_params.flow_rate:<15} {scaled_params.flow_rate:<15} {scaled_params.flow_rate/pilot_params.flow_rate:<15.1f}")
+
+    print("\nNITROGEN BALANCE (mg/day):")
+    print(f"{'Parameter':<25} {'Pilot':<15} {'Scaled':<15} {'Units':<15}")
+    print("-" * 70)
+    print(f"{'Feed N Input':<25} {pilot_nutrients['nitrogen']['feed_input']:<15.1f} {scaled_nutrients['nitrogen']['feed_input']:<15.1f} {'mg/day':<15}")
+    print(f"{'Fish N Retention':<25} {pilot_nutrients['nitrogen']['fish_retention']:<15.1f} {scaled_nutrients['nitrogen']['fish_retention']:<15.1f} {'mg/day':<15}")
+    print(f"{'Excreted N':<25} {pilot_nutrients['nitrogen']['excreted']:<15.1f} {scaled_nutrients['nitrogen']['excreted']:<15.1f} {'mg/day':<15}")
+    print(f"{'TAN Produced':<25} {pilot_nutrients['nitrogen']['tan_produced']:<15.1f} {scaled_nutrients['nitrogen']['tan_produced']:<15.1f} {'mg/day':<15}")
+    print(f"{'NO3 from Nitrification':<25} {pilot_nutrients['nitrogen']['no3_from_nitrif']:<15.1f} {scaled_nutrients['nitrogen']['no3_from_nitrif']:<15.1f} {'mg/day':<15}")
+    print(f"{'Plant N Uptake':<25} {pilot_nutrients['nitrogen']['plant_uptake']:<15.1f} {scaled_nutrients['nitrogen']['plant_uptake']:<15.1f} {'mg/day':<15}")
+    print(f"{'NH3 Residual':<25} {pilot_nutrients['nitrogen']['nh3_residual']:<15.1f} {scaled_nutrients['nitrogen']['nh3_residual']:<15.1f} {'mg/day':<15}")
+    print(f"{'NO3 Residual':<25} {pilot_nutrients['nitrogen']['no3_residual']:<15.1f} {scaled_nutrients['nitrogen']['no3_residual']:<15.1f} {'mg/day':<15}")
+    print(f"{'N Recovery (%)':<25} {pilot_nutrients['nitrogen']['recovery_percent']:<15.1f} {scaled_nutrients['nitrogen']['recovery_percent']:<15.1f} {'%':<15}")
+
+    print("\nPHOSPHORUS BALANCE (mg/day):")
+    print(f"{'Parameter':<25} {'Pilot':<15} {'Scaled':<15} {'Units':<15}")
+    print("-" * 70)
+    print(f"{'Feed P Input':<25} {pilot_nutrients['phosphorus']['feed_input']:<15.1f} {scaled_nutrients['phosphorus']['feed_input']:<15.1f} {'mg/day':<15}")
+    print(f"{'Fish P Retention':<25} {pilot_nutrients['phosphorus']['fish_retention']:<15.1f} {scaled_nutrients['phosphorus']['fish_retention']:<15.1f} {'mg/day':<15}")
+    print(f"{'Dissolved P':<25} {pilot_nutrients['phosphorus']['dissolved']:<15.1f} {scaled_nutrients['phosphorus']['dissolved']:<15.1f} {'mg/day':<15}")
+    print(f"{'Plant P Uptake':<25} {pilot_nutrients['phosphorus']['plant_uptake']:<15.1f} {scaled_nutrients['phosphorus']['plant_uptake']:<15.1f} {'mg/day':<15}")
+    print(f"{'Residual Dissolved P':<25} {pilot_nutrients['phosphorus']['residual']:<15.1f} {scaled_nutrients['phosphorus']['residual']:<15.1f} {'mg/day':<15}")
+    print(f"{'P Recovery (%)':<25} {pilot_nutrients['phosphorus']['recovery_percent']:<15.1f} {scaled_nutrients['phosphorus']['recovery_percent']:<15.1f} {'%':<15}")
+
+    print("\nOXYGEN BALANCE (mg/day):")
+    print(f"{'Parameter':<25} {'Pilot':<15} {'Scaled':<15} {'Units':<15}")
+    print("-" * 70)
+    print(f"{'Fish O2 Consumption':<25} {pilot_nutrients['oxygen']['fish_consumption']:<15.1f} {scaled_nutrients['oxygen']['fish_consumption']:<15.1f} {'mg/day':<15}")
+    print(f"{'Plant O2 Production':<25} {pilot_nutrients['oxygen']['plant_production']:<15.1f} {scaled_nutrients['oxygen']['plant_production']:<15.1f} {'mg/day':<15}")
+    print(f"{'Nitrification O2 Demand':<25} {pilot_nutrients['oxygen']['nitrification_demand']:<15.1f} {scaled_nutrients['oxygen']['nitrification_demand']:<15.1f} {'mg/day':<15}")
+    print(f"{'Net O2 Balance':<25} {pilot_nutrients['oxygen']['net_balance']:<15.1f} {scaled_nutrients['oxygen']['net_balance']:<15.1f} {'mg/day':<15}")
+    print(f"{'Aeration Required':<25} {pilot_nutrients['oxygen']['aeration_required']:<15.1f} {scaled_nutrients['oxygen']['aeration_required']:<15.1f} {'mg/day':<15}")
+
+    print("\nWATER QUALITY PARAMETERS")
+    print("-" * 50)
+    print(f"{'Parameter':<25} {'Pilot':<15} {'Scaled':<15} {'Target Range':<20} {'Status':<10}")
+    print("-" * 85)
+    nh3_status = "✓ Good" if pilot_water_quality['nh3_n'] < 0.5 and scaled_water_quality['nh3_n'] < 0.5 else "⚠ Monitor"
+    no3_status = "✓ Good" if 1.0 <= pilot_water_quality['no3_n'] <= 5.0 and 1.0 <= scaled_water_quality['no3_n'] <= 5.0 else "⚠ Adjust"
+    p_status = "✓ Good" if pilot_water_quality['dissolved_p'] < 1.0 and scaled_water_quality['dissolved_p'] < 1.0 else "⚠ Monitor"
+    ph_status = "✓ Good" if 6.8 <= pilot_water_quality['ph'] <= 7.4 and 6.8 <= scaled_water_quality['ph'] <= 7.4 else "⚠ Buffer"
+    do_status = "✓ Good" if pilot_water_quality['dissolved_oxygen'] >= 5.0 and scaled_water_quality['dissolved_oxygen'] >= 5.0 else "⚠ Aerate"
+    print(f"{'NH3-N (mg/L)':<25} {pilot_water_quality['nh3_n']:<15.3f} {scaled_water_quality['nh3_n']:<15.3f} {'< 0.5':<20} {nh3_status:<10}")
+    print(f"{'NO3-N (mg/L)':<25} {pilot_water_quality['no3_n']:<15.2f} {scaled_water_quality['no3_n']:<15.2f} {'1.0 - 5.0':<20} {no3_status:<10}")
+    print(f"{'Dissolved P (mg/L)':<25} {pilot_water_quality['dissolved_p']:<15.3f} {scaled_water_quality['dissolved_p']:<15.3f} {'< 1.0':<20} {p_status:<10}")
+    print(f"{'pH':<25} {pilot_water_quality['ph']:<15.2f} {scaled_water_quality['ph']:<15.2f} {'6.8 - 7.4':<20} {ph_status:<10}")
+    print(f"{'Dissolved O2 (mg/L)':<25} {pilot_water_quality['dissolved_oxygen']:<15.1f} {scaled_water_quality['dissolved_oxygen']:<15.1f} {'> 5.0':<20} {do_status:<10}")
+    print(f"{'Temperature (°C)':<25} {pilot_water_quality['temperature']:<15.1f} {scaled_water_quality['temperature']:<15.1f} {'24 - 28':<20} {'✓ Good':<10}")
+
+    visualizer = NutrientVisualization()
+    visualizer.plot_nutrient_dynamics(pilot_nutrients, scaled_nutrients)
+    visualizer.plot_mass_balance(pilot_mass_balance, scaled_mass_balance)
+
+    nutrient_summary = pd.DataFrame({
+        'Parameter': [
+            'Nitrogen Recovery Efficiency (%)','Phosphorus Recovery Efficiency (%)','Fish N Retention (mg/day)','Plant N Uptake (mg/day)','NO3 Residual (mg/day)','NH3 Residual (mg/day)','Fish P Retention (mg/day)','Plant P Uptake (mg/day)','Residual Dissolved P (mg/day)','NH3-N Concentration (mg/L)','NO3-N Concentration (mg/L)','Dissolved P (mg/L)','Dissolved Oxygen (mg/L)','System pH','Aeration Requirement (mg O2/day)'],
+        'Pilot System': [
+            f"{pilot_nutrients['nitrogen']['recovery_percent']:.1f}",
+            f"{pilot_nutrients['phosphorus']['recovery_percent']:.1f}",
+            f"{pilot_nutrients['nitrogen']['fish_retention']:.1f}",
+            f"{pilot_nutrients['nitrogen']['plant_uptake']:.1f}",
+            f"{pilot_nutrients['nitrogen']['no3_residual']:.1f}",
+            f"{pilot_nutrients['nitrogen']['nh3_residual']:.1f}",
+            f"{pilot_nutrients['phosphorus']['fish_retention']:.1f}",
+            f"{pilot_nutrients['phosphorus']['plant_uptake']:.1f}",
+            f"{pilot_nutrients['phosphorus']['residual']:.1f}",
+            f"{pilot_water_quality['nh3_n']:.3f}",
+            f"{pilot_water_quality['no3_n']:.2f}",
+            f"{pilot_water_quality['dissolved_p']:.3f}",
+            f"{pilot_water_quality['dissolved_oxygen']:.1f}",
+            f"{pilot_water_quality['ph']:.2f}",
+            f"{pilot_nutrients['oxygen']['aeration_required']:.1f}"],
+        'Scaled System': [
+            f"{scaled_nutrients['nitrogen']['recovery_percent']:.1f}",
+            f"{scaled_nutrients['phosphorus']['recovery_percent']:.1f}",
+            f"{scaled_nutrients['nitrogen']['fish_retention']:.1f}",
+            f"{scaled_nutrients['nitrogen']['plant_uptake']:.1f}",
+            f"{scaled_nutrients['nitrogen']['no3_residual']:.1f}",
+            f"{scaled_nutrients['nitrogen']['nh3_residual']:.1f}",
+            f"{scaled_nutrients['phosphorus']['fish_retention']:.1f}",
+            f"{scaled_nutrients['phosphorus']['plant_uptake']:.1f}",
+            f"{scaled_nutrients['phosphorus']['residual']:.1f}",
+            f"{scaled_water_quality['nh3_n']:.3f}",
+            f"{scaled_water_quality['no3_n']:.2f}",
+            f"{scaled_water_quality['dissolved_p']:.3f}",
+            f"{scaled_water_quality['dissolved_oxygen']:.1f}",
+            f"{scaled_water_quality['ph']:.2f}",
+            f"{scaled_nutrients['oxygen']['aeration_required']:.1f}"]
+    })
+    print("\nNUTRIENT BALANCE & WATER QUALITY SUMMARY:")
+    print(nutrient_summary.to_string(index=False))
+
+    mass_summary = pd.DataFrame({
+        'Parameter': [
+            'Fish Production (kg/year)','Lettuce Production (plants/year)','Feed Consumption (kg/year)','Water Consumption (m³/year)','Solid Waste Production (kg/year)','Feed Conversion Ratio','Water Use Efficiency (kg/m³)','System Productivity (kg/m²/year)','Nitrogen Utilization (%)','Phosphorus Utilization (%)'],
+        'Pilot System': [
+            f"{pilot_mass_balance['outputs']['fish_kg']:.1f}",
+            f"{pilot_mass_balance['outputs']['lettuce_count']:.0f}",
+            f"{pilot_mass_balance['inputs']['feed_kg']:.1f}",
+            f"{pilot_mass_balance['inputs']['water_L']/1000:.1f}",
+            f"{pilot_mass_balance['outputs']['solid_waste_kg']:.1f}",
+            f"{pilot_mass_balance['efficiency']['feed_conversion']:.2f}",
+            f"{pilot_mass_balance['efficiency']['water_use_efficiency']:.2f}",
+            f"{pilot_mass_balance['efficiency']['system_productivity']:.1f}",
+            f"{pilot_mass_balance['efficiency']['nitrogen_utilization']:.1f}",
+            f"{pilot_mass_balance['efficiency']['phosphorus_utilization']:.1f}"],
+        'Scaled System': [
+            f"{scaled_mass_balance['outputs']['fish_kg']:.1f}",
+            f"{scaled_mass_balance['outputs']['lettuce_count']:.0f}",
+            f"{scaled_mass_balance['inputs']['feed_kg']:.1f}",
+            f"{scaled_mass_balance['inputs']['water_L']/1000:.1f}",
+            f"{scaled_mass_balance['outputs']['solid_waste_kg']:.1f}",
+            f"{scaled_mass_balance['efficiency']['feed_conversion']:.2f}",
+            f"{scaled_mass_balance['efficiency']['water_use_efficiency']:.2f}",
+            f"{scaled_mass_balance['efficiency']['system_productivity']:.1f}",
+            f"{scaled_mass_balance['efficiency']['nitrogen_utilization']:.1f}",
+            f"{scaled_mass_balance['efficiency']['phosphorus_utilization']:.1f}"],
+        'Scale Factor': [
+            f"{scaled_mass_balance['outputs']['fish_kg']/pilot_mass_balance['outputs']['fish_kg']:.1f}x",
+            f"{scaled_mass_balance['outputs']['lettuce_count']/pilot_mass_balance['outputs']['lettuce_count']:.1f}x",
+            f"{scaled_mass_balance['inputs']['feed_kg']/pilot_mass_balance['inputs']['feed_kg']:.1f}x",
+            f"{(scaled_mass_balance['inputs']['water_L']/pilot_mass_balance['inputs']['water_L']):.1f}x",
+            f"{scaled_mass_balance['outputs']['solid_waste_kg']/pilot_mass_balance['outputs']['solid_waste_kg']:.1f}x",
+            "1.0x","1.0x","1.0x","1.0x","1.0x"]
+    })
+    print("\nMASS BALANCE SUMMARY:")
+    print(mass_summary.to_string(index=False))
+
+    return {
+        'pilot_nutrients': pilot_nutrients,
+        'scaled_nutrients': scaled_nutrients,
+        'pilot_mass_balance': pilot_mass_balance,
+        'scaled_mass_balance': scaled_mass_balance,
+        'pilot_water_quality': pilot_water_quality,
+        'scaled_water_quality': scaled_water_quality
+    }
+
+if __name__ == "__main__":
+    results = analyze_nutrient_mass_balance()
