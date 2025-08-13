@@ -1,0 +1,475 @@
+import numpy as np
+from dataclasses import dataclass
+from typing import Dict
+
+@dataclass
+class SystemParameters:
+    """System design parameters from mass balance analysis"""
+    # Physical System Specifications
+    fish_tank_volume: float = 757           # L
+    settling_tank_volume: float = 189       # L
+    biofilter_volume: float = 189           # L
+    hydroponic_tank_volume: float = 681     # L
+    sump_tank_volume: float = 189           # L
+    total_volume: float = 1825              # L
+    flow_rate: float = 15                   # L/min
+    grow_bed_area: float = 1.49             # m²
+
+    # Fish Production Parameters (From Mass Balance Analysis)
+    fish_count_fingerlings: float = 23      # Fish stocked per cycle
+    fish_count_adults: float = 22.6         # Fish harvested per cycle
+    initial_weight: float = 100             # g
+    harvest_weight: float = 670             # g
+    survival_rate: float = 0.983            # 98.3%
+    mortality_rate: float = 0.017           # 1.7%
+    fcr: float = 1.7                        # Feed conversion ratio
+    feeding_rate: float = 0.03              # 3% body weight per day
+    growth_cycles: int = 2                  # Cycles per year
+    cycle_duration: float = 129             # Days per cycle
+
+    # Plant Production Parameters
+    plant_density: float = 20               # plants/m²
+    total_plants: float = 2500                # Total plants per year (User specified)
+    lettuce_weight: float = 100              # g per plant
+    germination_rate: float = 0.90          # 90%
+    harvest_cycle: float = 45               # Days per cycle
+
+    # Environmental Parameters
+    temperature: float = 25.0               # °C
+    dissolved_oxygen_target: float = 6.0    # mg/L
+    ph_target: float = 7.0
+
+@dataclass
+class EconomicParameters:
+    """Economic parameters for baseline analysis"""
+    # Capital Equipment Costs (USD)
+    fish_tank_cost: float = 2500
+    biofilter_cost: float = 1500
+    plant_bed_cost: float = 2000
+    pump_cost: float = 800
+    aeration_cost: float = 1200
+    plumbing_cost: float = 1000
+    greenhouse_cost: float = 15000
+    lighting_cost: float = 3000
+    heating_cost: float = 2500
+    monitoring_cost: float = 2000
+
+    # Operating Parameters
+    feed_cost_per_kg: float = 1.5          # USD/kg
+    electricity_rate: float = 0.12         # USD/kWh
+    labor_hours_per_year: float = 520      # Hours/year
+    labor_rate: float = 15                 # USD/hour
+    maintenance_rate: float = 0.05         # 5% of equipment
+    insurance_rate: float = 0.02           # 2% of capital
+
+    # Market Prices
+    tilapia_price: float = 3.0             # USD/kg
+    lettuce_price: float = 3.0             # USD/kg
+
+    # Financial Parameters
+    project_life: int = 20                 # Years
+    discount_rate: float = 0.071           # 7.1%
+
+class BaselineAnalysis:
+    """Baseline techno-economic analysis calculator"""
+
+    def __init__(self):
+        self.system_params = SystemParameters()
+        self.economic_params = EconomicParameters()
+
+        # Energy consumption parameters (W)
+        self.pump_power = 150
+        self.aeration_power = 400
+        self.lighting_power = 4500
+        self.heating_power = 3000
+        self.monitoring_power = 75
+
+        # Operating hours per day
+        self.operating_hours = {
+            'pumps': 24,
+            'aeration': 20,
+            'lighting': 12,
+            'heating': 8,
+            'monitoring': 24
+        }
+
+    def calculate_annual_production(self) -> Dict:
+        """Calculate annual production from mass balance data"""
+
+        # Fish Production
+        fingerlings_stocked = self.system_params.fish_count_fingerlings
+        adults_harvested = fingerlings_stocked * self.system_params.survival_rate
+
+        # Biomass per cycle
+        initial_biomass_kg = fingerlings_stocked * self.system_params.initial_weight / 1000
+        final_biomass_kg = adults_harvested * self.system_params.harvest_weight / 1000
+        biomass_gain_kg = final_biomass_kg - initial_biomass_kg
+
+        # Annual fish production
+        annual_fish_harvest = final_biomass_kg * self.system_params.growth_cycles
+        annual_fish_gain = biomass_gain_kg * self.system_params.growth_cycles
+
+        # Feed requirements
+        avg_weight_g = (self.system_params.initial_weight + self.system_params.harvest_weight) / 2
+        avg_biomass_kg = fingerlings_stocked * avg_weight_g / 1000
+        daily_feed_kg = avg_biomass_kg * self.system_params.feeding_rate
+        feed_per_cycle = daily_feed_kg * self.system_params.cycle_duration
+        annual_feed = feed_per_cycle * self.system_params.growth_cycles
+
+        # Plant Production
+        # total_plants = self.system_params.grow_bed_area * self.system_params.plant_density
+        # harvests_per_year = 365 / self.system_params.harvest_cycle
+        # annual_plant_count = total_plants * harvests_per_year * self.system_params.germination_rate
+        annual_plant_count = self.system_params.total_plants  # Use user-specified annual count
+        annual_lettuce_kg = annual_plant_count * self.system_params.lettuce_weight / 1000
+
+        # Resource Requirements
+        evapotranspiration = 2.0 * self.system_params.grow_bed_area * 365
+        filter_cleaning = (self.system_params.settling_tank_volume + self.system_params.biofilter_volume) * 0.1 * 26
+        daily_exchange = self.system_params.total_volume * 0.05 * 365
+        total_water_L = evapotranspiration + filter_cleaning + daily_exchange
+
+        fingerlings_required = fingerlings_stocked * self.system_params.growth_cycles
+        seeds_required = annual_plant_count / self.system_params.germination_rate
+
+        return {
+            'fish_kg': annual_fish_harvest,
+            'fish_count': adults_harvested * self.system_params.growth_cycles,
+            'lettuce_kg': annual_lettuce_kg,
+            'lettuce_count': annual_plant_count,
+            'feed_kg': annual_feed,
+            'water_L': total_water_L,
+            'fingerlings_required': fingerlings_required,
+            'seeds_required': seeds_required,
+            'cycles_per_year': self.system_params.growth_cycles,
+            'harvest_weight_g': self.system_params.harvest_weight,
+            'survival_rate': self.system_params.survival_rate,
+            'fcr': self.system_params.fcr
+        }
+
+    def calculate_energy_consumption(self) -> Dict:
+        """Calculate annual energy consumption"""
+
+        # Daily consumption by component (kWh)
+        daily_consumption = {
+            'pumps': self.pump_power * self.operating_hours['pumps'] / 1000,
+            'aeration': self.aeration_power * self.operating_hours['aeration'] / 1000,
+            'lighting': self.lighting_power * self.operating_hours['lighting'] / 1000,
+            'heating': self.heating_power * self.operating_hours['heating'] / 1000,
+            'monitoring': self.monitoring_power * self.operating_hours['monitoring'] / 1000
+        }
+
+        total_daily = sum(daily_consumption.values())
+        annual_consumption = total_daily * 365
+
+        return {
+            'daily_breakdown': daily_consumption,
+            'total_daily': total_daily,
+            'annual_consumption': annual_consumption
+        }
+
+    def calculate_capex(self) -> Dict:
+        """Calculate capital expenditures"""
+
+        # Equipment costs
+        equipment = {
+            'fish_tank': self.economic_params.fish_tank_cost,
+            'biofilter': self.economic_params.biofilter_cost,
+            'plant_bed': self.economic_params.plant_bed_cost,
+            'pumps': self.economic_params.pump_cost,
+            'aeration': self.economic_params.aeration_cost,
+            'plumbing': self.economic_params.plumbing_cost,
+            'greenhouse': self.economic_params.greenhouse_cost,
+            'lighting': self.economic_params.lighting_cost,
+            'heating': self.economic_params.heating_cost,
+            'monitoring': self.economic_params.monitoring_cost
+        }
+
+        total_equipment = sum(equipment.values())
+
+        # Project costs
+        engineering = 0.25 * total_equipment
+        construction = 0.35 * total_equipment
+        contractors_fee = 0.05 * (total_equipment + engineering + construction)
+        contingency = 0.10 * (total_equipment + engineering + construction + contractors_fee)
+
+        direct_fixed_capital = total_equipment + engineering + construction + contractors_fee + contingency
+        working_capital = 0.05 * direct_fixed_capital
+        startup_cost = 0.05 * direct_fixed_capital
+
+        total_capex = direct_fixed_capital + working_capital + startup_cost
+
+        return {
+            'equipment': equipment,
+            'total_equipment': total_equipment,
+            'engineering': engineering,
+            'construction': construction,
+            'contractors_fee': contractors_fee,
+            'contingency': contingency,
+            'direct_fixed_capital': direct_fixed_capital,
+            'working_capital': working_capital,
+            'startup_cost': startup_cost,
+            'total_capex': total_capex
+        }
+
+    def calculate_opex(self, production: Dict, energy: Dict) -> Dict:
+        """Calculate operating expenditures"""
+
+        # Variable costs
+        fingerlings_cost = production['fingerlings_required'] * 2.00
+        feed_cost = production['feed_kg'] * self.economic_params.feed_cost_per_kg
+        seeds_cost = production['seeds_required'] * 0.05
+        electricity_cost = energy['annual_consumption'] * self.economic_params.electricity_rate
+        water_cost = production['water_L'] * 0.002
+
+        # Fixed costs
+        labor_cost = self.economic_params.labor_hours_per_year * self.economic_params.labor_rate
+        operating_supervision = 0.2 * labor_cost
+
+        # Equipment-related costs
+        capex = self.calculate_capex()
+        maintenance = self.economic_params.maintenance_rate * capex['total_equipment']
+        insurance = self.economic_params.insurance_rate * capex['direct_fixed_capital']
+        property_tax = 0.01 * capex['direct_fixed_capital']
+
+        # Labor-related costs
+        fringe_benefits = 0.3 * (labor_cost + operating_supervision)
+        overhead = 0.22 * (labor_cost + operating_supervision)
+
+        # Depreciation
+        depreciation = capex['total_equipment'] / self.economic_params.project_life
+
+        total_opex = (fingerlings_cost + feed_cost + seeds_cost + electricity_cost +
+                      water_cost + labor_cost + operating_supervision + maintenance +
+                      insurance + property_tax + fringe_benefits + overhead + depreciation)
+
+        return {
+            'fingerlings': fingerlings_cost,
+            'feed': feed_cost,
+            'seeds': seeds_cost,
+            'electricity': electricity_cost,
+            'water': water_cost,
+            'labor': labor_cost,
+            'operating_supervision': operating_supervision,
+            'maintenance': maintenance,
+            'insurance': insurance,
+            'property_tax': property_tax,
+            'fringe_benefits': fringe_benefits,
+            'overhead': overhead,
+            'depreciation': depreciation,
+            'total_opex': total_opex
+        }
+
+    def calculate_revenue(self, production: Dict) -> Dict:
+        """Calculate annual revenue"""
+
+        fish_revenue = production['fish_kg'] * self.economic_params.tilapia_price
+        lettuce_revenue = production['lettuce_kg'] * self.economic_params.lettuce_price
+        total_revenue = fish_revenue + lettuce_revenue
+
+        return {
+            'fish_revenue': fish_revenue,
+            'lettuce_revenue': lettuce_revenue,
+            'total_revenue': total_revenue
+        }
+
+    def calculate_financial_metrics(self, revenue: float, opex: float, capex: float) -> Dict:
+        """Calculate financial performance metrics"""
+
+        annual_profit = revenue - opex
+
+        # NPV calculation
+        cash_flows = [annual_profit] * self.economic_params.project_life
+        npv = -capex + sum(cf / (1 + self.economic_params.discount_rate)**t
+                          for t, cf in enumerate(cash_flows, 1))
+
+        # Financial ratios
+        roi = (annual_profit / capex) * 100 if capex > 0 else 0
+        payback_period = capex / annual_profit if annual_profit > 0 else float('inf')
+
+        # Profitability index
+        pv_benefits = sum(cf / (1 + self.economic_params.discount_rate)**t
+                         for t, cf in enumerate(cash_flows, 1))
+        profitability_index = pv_benefits / capex if capex > 0 else 0
+
+        return {
+            'annual_profit': annual_profit,
+            'npv': npv,
+            'roi': roi,
+            'payback_period': payback_period,
+            'profitability_index': profitability_index
+        }
+
+    def run_baseline_analysis(self) -> Dict:
+        """Run complete baseline analysis"""
+
+        print("BASELINE AQUAPONICS TECHNO-ECONOMIC ANALYSIS")
+        print("=" * 60)
+        print("Based on Mass Balance and Nutrient Analysis Data")
+        print()
+
+        # Calculate all components
+        production = self.calculate_annual_production()
+        energy = self.calculate_energy_consumption()
+        capex = self.calculate_capex()
+        opex = self.calculate_opex(production, energy)
+        revenue = self.calculate_revenue(production)
+        financial = self.calculate_financial_metrics(revenue['total_revenue'],
+                                                    opex['total_opex'],
+                                                    capex['total_capex'])
+
+        # Print results
+        self.print_results(production, energy, capex, opex, revenue, financial)
+
+        return {
+            'production': production,
+            'energy': energy,
+            'capex': capex,
+            'opex': opex,
+            'revenue': revenue,
+            'financial': financial
+        }
+
+    def print_results(self, production, energy, capex, opex, revenue, financial):
+        """Print baseline analysis results"""
+
+        print("SYSTEM SPECIFICATIONS")
+        print("-" * 40)
+        print(f"Fish tank volume:        {self.system_params.fish_tank_volume:,.0f} L")
+        print(f"Total system volume:     {self.system_params.total_volume:,.0f} L")
+        print(f"Growing bed area:        {self.system_params.grow_bed_area:.2f} m²")
+        print(f"Flow rate:               {self.system_params.flow_rate} L/min")
+        print()
+
+        print("ANNUAL PRODUCTION")
+        print("-" * 40)
+        print(f"Fish production:         {production['fish_kg']:.1f} kg/year ({production['fish_count']:.0f} fish)")
+        print(f"Lettuce production:      {production['lettuce_kg']:.1f} kg/year ({production['lettuce_count']:.0f} plants)")
+        print(f"Total biomass:           {production['fish_kg'] + production['lettuce_kg']:.1f} kg/year")
+        print(f"Feed required:           {production['feed_kg']:.1f} kg/year")
+        print(f"Water consumption:       {production['water_L']:,.0f} L/year")
+        print(f"Fingerlings required:    {production['fingerlings_required']:.0f}/year")
+        print(f"Seeds required:          {production['seeds_required']:.0f}/year")
+        print()
+
+        print("PRODUCTION EFFICIENCY")
+        print("-" * 40)
+        print(f"Fish survival rate:      {production['survival_rate']*100:.1f}%")
+        print(f"Feed conversion ratio:   {production['fcr']:.2f}")
+        print(f"Fish harvest weight:     {production['harvest_weight_g']:.0f} g/fish")
+        print(f"Growth cycles/year:      {production['cycles_per_year']}")
+        print(f"Lettuce cycles/year:     {365/self.system_params.harvest_cycle:.1f}")
+        print()
+
+        print("ENERGY CONSUMPTION")
+        print("-" * 40)
+        for component, consumption in energy['daily_breakdown'].items():
+            print(f"{component.capitalize():<20}: {consumption:.1f} kWh/day")
+        print(f"{'Total daily':<20}: {energy['total_daily']:.1f} kWh/day")
+        print(f"{'Annual consumption':<20}: {energy['annual_consumption']:,.0f} kWh/year")
+        total_production = production['fish_kg'] + production['lettuce_kg']
+        energy_intensity = energy['annual_consumption'] / total_production if total_production > 0 else 0
+        print(f"{'Energy intensity':<20}: {energy_intensity:.1f} kWh/kg product")
+        print()
+
+        print("CAPITAL EXPENDITURE (CAPEX)")
+        print("-" * 40)
+        print("Equipment costs:")
+        for item, cost in capex['equipment'].items():
+            print(f"  {item.replace('_', ' ').title():<18}: ${cost:>8,.0f}")
+        print(f"  {'Total equipment':<18}: ${capex['total_equipment']:>8,.0f}")
+        print(f"Engineering (25%):       ${capex['engineering']:,.0f}")
+        print(f"Construction (35%):      ${capex['construction']:,.0f}")
+        print(f"Contractor's fee (5%):   ${capex['contractors_fee']:,.0f}")
+        print(f"Contingency (10%):       ${capex['contingency']:,.0f}")
+        print(f"Working capital (5%):    ${capex['working_capital']:,.0f}")
+        print(f"Startup cost (5%):      ${capex['startup_cost']:,.0f}")
+        print(f"{'TOTAL CAPEX':<20}: ${capex['total_capex']:>12,.0f}")
+        print()
+
+        print("OPERATING EXPENDITURE (OPEX)")
+        print("-" * 40)
+        print("Variable costs:")
+        print(f"  Fingerlings:           ${opex['fingerlings']:>8,.0f}")
+        print(f"  Feed:                  ${opex['feed']:>8,.0f}")
+        print(f"  Seeds:                 ${opex['seeds']:>8,.0f}")
+        print(f"  Electricity:           ${opex['electricity']:>8,.0f}")
+        print(f"  Water:                 ${opex['water']:>8,.0f}")
+        print("Fixed costs:")
+        print(f"  Labor:                 ${opex['labor']:>8,.0f}")
+        print(f"  Operating supervision: ${opex['operating_supervision']:>8,.0f}")
+        print(f"  Maintenance:           ${opex['maintenance']:>8,.0f}")
+        print(f"  Insurance:             ${opex['insurance']:>8,.0f}")
+        print(f"  Property tax:          ${opex['property_tax']:>8,.0f}")
+        print(f"  Fringe benefits:       ${opex['fringe_benefits']:>8,.0f}")
+        print(f"  Overhead:              ${opex['overhead']:>8,.0f}")
+        print(f"  Depreciation:          ${opex['depreciation']:>8,.0f}")
+        print(f"{'TOTAL ANNUAL OPEX':<20}: ${opex['total_opex']:>12,.0f}")
+        print()
+
+        print("REVENUE")
+        print("-" * 40)
+        print(f"Fish revenue:            ${revenue['fish_revenue']:,.0f}")
+        print(f"  ({production['fish_kg']:.1f} kg × ${self.economic_params.tilapia_price:.2f}/kg)")
+        print(f"Lettuce revenue:         ${revenue['lettuce_revenue']:,.0f}")
+        print(f"  ({production['lettuce_kg']:.1f} kg × ${self.economic_params.lettuce_price:.2f}/kg)")
+        print(f"{'TOTAL ANNUAL REVENUE':<20}: ${revenue['total_revenue']:>12,.0f}")
+        print()
+
+        print("FINANCIAL PERFORMANCE")
+        print("-" * 40)
+        print(f"Annual revenue:          ${revenue['total_revenue']:,.0f}")
+        print(f"Annual OPEX:             ${opex['total_opex']:,.0f}")
+        print(f"Annual profit/loss:      ${financial['annual_profit']:,.0f}")
+        print(f"Net Present Value:       ${financial['npv']:,.0f}")
+        print(f"Return on Investment:    {financial['roi']:.1f}%")
+        if financial['payback_period'] == float('inf'):
+            print(f"Payback period:          Never")
+        else:
+            print(f"Payback period:          {financial['payback_period']:.1f} years")
+        print(f"Profitability index:     {financial['profitability_index']:.2f}")
+        print()
+
+        print("UNIT ECONOMICS")
+        print("-" * 40)
+        total_prod = production['fish_kg'] + production['lettuce_kg']
+        print(f"Revenue per kg product:  ${revenue['total_revenue']/total_prod:.2f}")
+        print(f"OPEX per kg product:     ${opex['total_opex']/total_prod:.2f}")
+        print(f"Profit per kg product:   ${financial['annual_profit']/total_prod:.2f}")
+        profit_margin = (financial['annual_profit']/revenue['total_revenue'])*100 if revenue['total_revenue'] > 0 else -100
+        print(f"Profit margin:           {profit_margin:.1f}%")
+        print()
+
+        print("BREAK-EVEN ANALYSIS")
+        print("-" * 40)
+        fish_breakeven = opex['total_opex'] / production['fish_kg'] if production['fish_kg'] > 0 else 0
+        lettuce_breakeven = opex['total_opex'] / production['lettuce_kg'] if production['lettuce_kg'] > 0 else 0
+        current_revenue = revenue['total_revenue']
+        production_multiplier = opex['total_opex'] / current_revenue if current_revenue > 0 else float('inf')
+
+        print(f"Fish break-even price:   ${fish_breakeven:.2f}/kg")
+        print(f"Lettuce break-even price: ${lettuce_breakeven:.2f}/kg")
+        print(f"Production scale needed: {production_multiplier:.1f}x current")
+        print()
+
+        print("INVESTMENT ASSESSMENT")
+        print("-" * 40)
+        if financial['npv'] > 0:
+            print("✅ PROJECT IS FINANCIALLY VIABLE")
+            print(f"   Positive NPV of ${financial['npv']:,.0f}")
+            print(f"   Acceptable ROI of {financial['roi']:.1f}%")
+        else:
+            print("❌ PROJECT IS NOT FINANCIALLY VIABLE")
+            print(f"   Negative NPV of ${financial['npv']:,.0f}")
+            print(f"   Poor ROI of {financial['roi']:.1f}%")
+            print(f"   Annual loss of ${abs(financial['annual_profit']):,.0f}")
+        print()
+
+def run_baseline_tea():
+    """Run baseline techno-economic analysis"""
+    baseline = BaselineAnalysis()
+    results = baseline.run_baseline_analysis()
+    return results
+
+if __name__ == "__main__":
+    results = run_baseline_tea()
